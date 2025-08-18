@@ -275,7 +275,7 @@ if model and idx_to_class and batch_dir and os.path.isdir(batch_dir):
     st.download_button("📥 결과 CSV 다운로드", data=csv, file_name="batch_predictions.csv", mime="text/csv")
 
 # --------------- Test 폴더 리포트 ---------------
-st.header("🧪 Test 폴더 정확도/리포트")
+st.header("Test 정확도/리포트")
 if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_dir):
     classes = [idx_to_class[i] for i in sorted(idx_to_class.keys())]
 
