@@ -214,7 +214,7 @@ if idx_to_class is None and model is not None:
     st.warning("라벨맵이 없어 클래스 이름 매핑이 불완전할 수 있습니다. class_to_idx.json을 제공하는 것을 권장합니다.")
 
 # --------------- 단일 이미지 업로드 예측 ---------------
-st.header("🖼️ 단일 이미지 예측")
+st.header("단일 이미지 예측")
 uploaded_files = st.file_uploader("이미지 업로드 (여러 장 가능)", type=["jpg","jpeg","png","bmp","gif","webp"], accept_multiple_files=True)
 
 if model and idx_to_class and uploaded_files:
@@ -265,7 +265,7 @@ if model and idx_to_class and batch_dir and os.path.isdir(batch_dir):
         cols = st.columns(6)
         for i, (im, cap) in enumerate(zip(grid_imgs, grid_caps)):
             with cols[i % 6]:
-                st.image(im, caption=cap, use_column_width=True)
+                st.image(img, caption="입력 이미지", use_container_width=True)
 
     # 결과 테이블 & 다운로드
     import pandas as pd
