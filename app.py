@@ -224,7 +224,7 @@ if model and idx_to_class and uploaded_files:
             img = Image.open(io.BytesIO(uf.read())).convert("RGB")
             label, conf, top, _ = predict_image(model, preprocess, img, idx_to_class, threshold=thresh, topk=topk)
             with cols[i % 3]:
-                st.image(img, caption=f"{uf.name}", use_column_width=True)
+                st.image(img, caption=f"{uf.name}", use_container_width=True)
                 st.markdown(f"**Pred:** `{label}`  |  **conf:** `{conf:.3f}`")
                 st.markdown("Top-{}:".format(topk))
                 for cls, p in top:
