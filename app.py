@@ -1,6 +1,6 @@
 # app.py (Streamlit UI for Hazard Classifier: awl/knife/scissor)
 # %%writefile app.py
-import os, io, json, time, itertools, subprocess
+import os, io, json, time, itertools
 import numpy as np
 import streamlit as st
 import tensorflow as tf
@@ -8,43 +8,64 @@ from PIL import Image, UnidentifiedImageError
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
 
-# =================== [NEW] 자동 다운로드 + 튼튼한 로더 ===================
-MODEL_LOCAL_FALLBACK = "hazard_resnet50.keras"  # 모델 경로를 못 찾으면 여기에 다운로드
-
-def ensure_model_via_gdown(local_path: str, env_key: str = "MODEL_FILE_ID"):
+# =================== 자동 다운로드 + 튼튼한 로더 ===================
+def _get_secret(*keys, env_key=None, default=""):
     """
-    - local_path가 존재하면 그대로 반환
-    - 없으면 환경변수(또는 Streamlit Secrets)에 있는 Google Drive file id로 gdown 다운로드
-    - 성공 시 local_path 반환, 실패 시 None
+    st.secrets['a']['b'] 혹은 st.secrets['A_B'] → 실패 시 os.environ[env_key] → default
     """
+    # 계층형
     try:
-        if os.path.exists(local_path):
-            return local_path
-        file_id = os.environ.get(env_key, "").strip()
-        if not file_id:
-            return None
+        d = st.secrets
+        for k in keys:
+            d = d[k]
+        if d:
+            return str(d)
+    except Exception:
+        pass
+    # 평평한
+    try:
+        flat_key = "_".join(keys).upper()
+        v = st.secrets.get(flat_key, "")
+        if v:
+            return str(v)
+    except Exception:
+        pass
+    # 환경변수
+    if env_key:
+        v = os.environ.get(env_key, "")
+        if v:
+            return str(v)
+    return default
+
+def ensure_file_via_gdown(local_path: str, file_id: str) -> str | None:
+    """
+    local_path 없고 file_id 있으면 Google Drive에서 다운로드
+    """
+    if os.path.exists(local_path):
+        return local_path
+    if not file_id:
+        return None
+    try:
+        import gdown
         url = f"https://drive.google.com/uc?id={file_id}"
-        subprocess.run(["gdown", url, "-O", local_path], check=True)
+        gdown.download(url, local_path, quiet=False)
         return local_path if os.path.exists(local_path) else None
     except Exception as e:
-        st.warning(f"gdown 다운로드 실패: {e}")
+        st.error(f"gdown 다운로드 실패: {e}")
         return None
 
 def load_model_robust(path: str):
     """
-    - 우선 keras.saving.load_model(.keras) 사용
-    - 실패 시 tf.keras.models.load_model(..., compile=False) 재시도
+    .keras(Keras3) 우선 → 실패 시 tf.keras 로더(compose=False)
     """
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"모델 경로가 존재하지 않습니다: {path}")
-    # .keras (Keras3) 우선
     try:
         import keras
         return keras.saving.load_model(path)
     except Exception:
-        # tf.keras 로더로 재시도
         return tf.keras.models.load_model(path, compile=False)
-# =======================================================================
+# ================================================================
 
 # --------------- UI 기본 설정 ---------------
 st.set_page_config(page_title="Hazard Classifier UI", layout="wide")
@@ -62,31 +83,37 @@ with st.sidebar:
         help="모델이 어떤 전처리를 썼는지에 따라 선택"
     )
 
-    # Colab에서 학습한 기본 경로를 미리 채워둡니다(필요시 수정)
-    default_model = "/content/hazard_resnet_runs/hazard_resnet50.keras"
-    default_labelmap = "/content/hazard_resnet_runs/artifacts_hazard/class_to_idx.json"
+    # ✅ Streamlit 환경에서는 현재 작업 디렉토리 기준이 가장 안전
+    default_model = "./hazard_resnet50.keras"
+    default_labelmap = "./class_to_idx.json"
     if backbone == "MobileNetV2":
-        default_model = "/content/hazard_mobilenet_runs/hazard_mobilenetv2.keras"
-        default_labelmap = "/content/hazard_mobilenet_runs/artifacts_hazard/class_to_idx.json"
+        default_model = "./hazard_mobilenetv2.keras"
+        default_labelmap = "./class_to_idx.json"
 
-    model_path = st.text_input("모델 경로(.keras) (비워두면 자동 다운로드 시도)", value=default_model)
-    labelmap_path = st.text_input("라벨맵 경로(class_to_idx.json)", value=default_labelmap)
+    model_path = st.text_input(
+        "모델 경로(.keras) (비워두면 자동 다운로드 시도)",
+        value=default_model
+    )
+    labelmap_path = st.text_input(
+        "라벨맵 경로(class_to_idx.json) (비워두면 자동 다운로드 시도)",
+        value=default_labelmap
+    )
 
     thresh = st.slider("불확실 임계치(↓면 과감, ↑면 보수)", min_value=0.0, max_value=0.99, value=0.75, step=0.01)
     topk = st.slider("Top-K 확률 표시", min_value=1, max_value=5, value=3, step=1)
 
     st.markdown("---")
     st.subheader("📂 폴더 일괄 예측 (선택)")
-    batch_dir = st.text_input("폴더 경로(이미지들)", value="")
+    batch_dir = st.text_input("폴더 경로(이미지들, 앱 서버 파일시스템 경로)", value="")
     show_grid = st.checkbox("그리드로 이미지/결과 미리보기", value=True)
 
     st.markdown("---")
     st.subheader("🧪 Test 폴더 리포트 (선택)")
-    test_dir = st.text_input("Test 폴더 루트 (class별 하위폴더 구조)", value="/content/clean_dataset_resnet/test")
+    test_dir = st.text_input("Test 폴더 루트 (class별 하위폴더 구조)", value="")
 
     st.markdown("---")
     st.caption("Tip: ResNet50은 resnet50 전처리, MobileNetV2는 mobilenet_v2 전처리를 사용해야 결과가 정확합니다.")
-    st.caption("Secrets에 MODEL_FILE_ID를 넣으면, 모델 경로가 없을 때 Google Drive에서 자동 다운로드합니다.")
+    st.caption("Secrets에 gdrive.model_file_id / labelmap_file_id 를 넣으면, 경로가 비었을 때 자동 다운로드합니다.")
 
 # --------------- 전처리 함수 ---------------
 @st.cache_resource(show_spinner=False)
@@ -98,17 +125,16 @@ def get_preprocess(backbone_name: str):
         from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
         return preprocess_input
 
+# 라벨맵 로더
 @st.cache_resource(show_spinner=False)
 def load_labelmap_safe(path: str):
     if not path or not os.path.exists(path):
-        st.error(f"라벨맵 파일을 찾을 수 없습니다: {path}")
         return None, None
     try:
         with open(path, "r", encoding="utf-8") as f:
             class_to_idx = json.load(f)
         idx_to_class = {i: c for c, i in class_to_idx.items()}
-        # idx 순서대로 클래스 리스트
-        _ = [idx_to_class[i] for i in sorted(idx_to_class.keys())]  # 검증용
+        _ = [idx_to_class[i] for i in sorted(idx_to_class.keys())]  # 검증
         return class_to_idx, idx_to_class
     except Exception as e:
         st.error(f"라벨맵 로드 실패: {e}")
@@ -149,29 +175,43 @@ def predict_image(model, preprocess, im: Image.Image, idx_to_class, threshold=0.
 # --------------- 모델/라벨맵 로드 ---------------
 preprocess = get_preprocess(backbone)
 
-# (A) 사용자가 입력한 경로가 존재하면 그대로 사용
-effective_model_path = model_path if model_path and os.path.exists(model_path) else None
+# Secrets → File ID 불러오기
+model_file_id = _get_secret("gdrive", "model_file_id", env_key="MODEL_FILE_ID", default="")
+labelmap_file_id = _get_secret("gdrive", "labelmap_file_id", env_key="LABELMAP_FILE_ID", default="")
 
-# (B) 경로가 없으면, Secrets의 MODEL_FILE_ID로 Google Drive에서 자동 다운로드
-if effective_model_path is None:
-    auto_path = ensure_model_via_gdown(MODEL_LOCAL_FALLBACK, env_key="MODEL_FILE_ID")
-    if auto_path:
-        st.info(f"모델 자동 다운로드 완료: {auto_path}")
-        effective_model_path = auto_path
+# 모델/라벨맵 경로가 없으면 자동 다운로드 시도
+effective_model_path = model_path if (model_path and os.path.exists(model_path)) else None
+effective_labelmap_path = labelmap_path if (labelmap_path and os.path.exists(labelmap_path)) else None
 
-# (C) 그래도 없으면 에러 안내
 if effective_model_path is None:
-    st.error("모델 경로가 없고, 자동 다운로드도 실패했습니다. 모델 경로를 입력하거나 Secrets에 MODEL_FILE_ID를 설정하세요.")
+    # 백본에 따라 파일명이 다를 수 있으나, 기본적으로 아래 이름으로 받는다
+    fallback_model_name = "hazard_resnet50.keras" if backbone == "ResNet50" else "hazard_mobilenetv2.keras"
+    auto_model = ensure_file_via_gdown(f"./{fallback_model_name}", model_file_id)
+    if auto_model:
+        st.info(f"모델 자동 다운로드 완료: {auto_model}")
+        effective_model_path = auto_model
+
+if effective_labelmap_path is None and labelmap_file_id:
+    auto_map = ensure_file_via_gdown("./class_to_idx.json", labelmap_file_id)
+    if auto_map:
+        st.info(f"라벨맵 자동 다운로드 완료: {auto_map}")
+        effective_labelmap_path = auto_map
+
+# 모델 로드
+if effective_model_path is None:
+    st.error("모델 경로가 없고, 자동 다운로드도 실패했습니다. 모델 경로를 입력하거나 Secrets에 gdrive.model_file_id (또는 MODEL_FILE_ID)를 설정하세요.")
     model = None
 else:
-    # 튼튼한 로더로 모델 로드
     try:
         model = load_model_robust(effective_model_path)
     except Exception as e:
         st.error(f"모델 로드 실패: {e}")
         model = None
 
-class_to_idx, idx_to_class = load_labelmap_safe(labelmap_path)
+# 라벨맵 로드
+class_to_idx, idx_to_class = load_labelmap_safe(effective_labelmap_path)
+if idx_to_class is None and model is not None:
+    st.warning("라벨맵이 없어 클래스 이름 매핑이 불완전할 수 있습니다. class_to_idx.json을 제공하는 것을 권장합니다.")
 
 # --------------- 단일 이미지 업로드 예측 ---------------
 st.header("🖼️ 단일 이미지 예측")
@@ -206,7 +246,13 @@ if model and idx_to_class and batch_dir and os.path.isdir(batch_dir):
         try:
             im = safe_open_image(p)
             label, conf, top, _ = predict_image(model, preprocess, im, idx_to_class, threshold=thresh, topk=topk)
-            preds.append({"path": p, "pred": label, "conf": conf, **{f"top{i+1}_cls": t[0] for i,t in enumerate(top)}, **{f"top{i+1}_prob": t[1] for i,t in enumerate(top)}})
+            preds.append({
+                "path": p,
+                "pred": label,
+                "conf": conf,
+                **{f"top{i+1}_cls": t[0] for i, t in enumerate(top)},
+                **{f"top{i+1}_prob": t[1] for i, t in enumerate(top)}
+            })
             if show_grid and len(grid_imgs) < 24:
                 grid_imgs.append(im.copy())
                 grid_caps.append(f"{os.path.basename(p)}\n→ {label} ({conf:.2f})")
@@ -236,7 +282,7 @@ if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_d
     img_paths, y_true = [], []
     for cls in classes:
         cls_dir = os.path.join(test_dir, cls)
-        if not os.path.isdir(cls_dir): 
+        if not os.path.isdir(cls_dir):
             continue
         for name in os.listdir(cls_dir):
             p = os.path.join(cls_dir, name)
@@ -264,8 +310,8 @@ if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_d
                 y_pred.append(class_to_idx[top[0][0]])
 
         # 리포트
-        report = classification_report(y_true, y_pred, target_names=classes, digits=4, output_dict=False)
-        st.text("Classification Report\n" + report)
+        report_text = classification_report(y_true, y_pred, target_names=classes, digits=4)
+        st.text("Classification Report\n" + report_text)
 
         # 정확도
         acc = (np.array(y_true) == np.array(y_pred)).mean()
