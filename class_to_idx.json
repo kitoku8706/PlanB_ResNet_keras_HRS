@@ -1,5 +1,7 @@
 {
   "awl": 0,
-  "knife": 1,
-  "scissor": 2
+  "gun": 1,
+  "knife": 2,
+  "phone": 3,
+  "scissors": 4
 }
