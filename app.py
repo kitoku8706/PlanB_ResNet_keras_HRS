@@ -85,7 +85,7 @@ with st.sidebar:
 
     # ✅ Streamlit 환경에서는 현재 작업 디렉토리 기준이 가장 안전
     default_model = "./hazard_resnet50_eye_new.keras"
-    default_labelmap = "./history_eye_new.json"
+    default_labelmap = "./class_to_idx.json"
     if backbone == "MobileNetV2":
         default_model = "./hazard_mobilenetv2.keras"
         default_labelmap = "./class_to_idx.json"
@@ -192,7 +192,7 @@ if effective_model_path is None:
         effective_model_path = auto_model
 
 if effective_labelmap_path is None and labelmap_file_id:
-    auto_map = ensure_file_via_gdown("./history_eye_new.json", labelmap_file_id)
+    auto_map = ensure_file_via_gdown("./class_to_idx.json", labelmap_file_id)
     if auto_map:
         st.info(f"라벨맵 자동 다운로드 완료: {auto_map}")
         effective_labelmap_path = auto_map
