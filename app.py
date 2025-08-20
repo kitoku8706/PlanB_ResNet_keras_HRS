@@ -1,4 +1,4 @@
-# app.py (Streamlit UI for Hazard Classifier: awl/knife/scissor)
+# app.py (Streamlit UI for Hazard Classifier: awl/gun/knife/phone/scissors)
 # %%writefile app.py
 import os, io, json, time, itertools
 import numpy as np
@@ -65,12 +65,13 @@ def load_model_robust(path: str):
         return keras.saving.load_model(path)
     except Exception:
         return tf.keras.models.load_model(path, compile=False)
+
 # ================================================================
 
 # --------------- UI 기본 설정 ---------------
 st.set_page_config(page_title="Hazard Classifier UI", layout="wide")
-st.title("🔪 Hazard Classifier (awl / knife / scissor)")
-st.caption("ResNet50 / MobileNetV2 모델 체크포인트로 예측 · 시각화 · 리포트")
+st.title("🔪 Hazard Classifier (awl / gun / knife / phone / scissors)")
+st.caption("ResNet50 / MobileNetV2 체크포인트로 예측 · 시각화 · 리포트 (TOP-5 지원)")
 
 # --------------- 사이드바 설정 ---------------
 with st.sidebar:
@@ -83,7 +84,7 @@ with st.sidebar:
         help="모델이 어떤 전처리를 썼는지에 따라 선택"
     )
 
-    # ✅ Streamlit 환경에서는 현재 작업 디렉토리 기준이 가장 안전
+    # ✅ Streamlit 현재 작업 디렉토리 기준
     default_model = "./hazard_resnet50_eye_new.keras"
     default_labelmap = "./class_to_idx.json"
     if backbone == "MobileNetV2":
@@ -133,8 +134,10 @@ def load_labelmap_safe(path: str):
     try:
         with open(path, "r", encoding="utf-8") as f:
             class_to_idx = json.load(f)
+        # idx_to_class: {0:"awl", 1:"gun", ...}
         idx_to_class = {i: c for c, i in class_to_idx.items()}
-        _ = [idx_to_class[i] for i in sorted(idx_to_class.keys())]  # 검증
+        # 검증
+        _ = [idx_to_class[i] for i in sorted(idx_to_class.keys())]
         return class_to_idx, idx_to_class
     except Exception as e:
         st.error(f"라벨맵 로드 실패: {e}")
@@ -163,11 +166,12 @@ def preprocess_image(im: Image.Image, img_size=(224,224), preprocess=None):
     x = np.expand_dims(x, axis=0)
     return x
 
-def predict_image(model, preprocess, im: Image.Image, idx_to_class, threshold=0.75, topk=3):
+def predict_image(model, preprocess, im: Image.Image, idx_to_class, threshold=0.75, topk=5):
     x = preprocess_image(im, (224,224), preprocess)
     prob = model.predict(x, verbose=0)[0]  # (num_classes,)
     order = np.argsort(prob)[::-1]
-    top = [(idx_to_class[i], float(prob[i])) for i in order[:topk]]
+    k = min(topk, len(order))
+    top = [(idx_to_class[i], float(prob[i])) for i in order[:k]]
     best_idx = int(order[0]); best_cls = idx_to_class[best_idx]; best_conf = float(prob[best_idx])
     label = best_cls if best_conf >= threshold else "uncertain"
     return label, best_conf, top, prob
@@ -226,7 +230,7 @@ if model and idx_to_class and uploaded_files:
             with cols[i % 3]:
                 st.image(img, caption=f"{uf.name}", use_container_width=True)
                 st.markdown(f"**Pred:** `{label}`  |  **conf:** `{conf:.3f}`")
-                st.markdown("Top-{}:".format(topk))
+                st.markdown(f"Top-{len(top)}:")
                 for cls, p in top:
                     st.caption(f"- {cls}: {p:.3f}")
         except Exception as e:
@@ -265,7 +269,7 @@ if model and idx_to_class and batch_dir and os.path.isdir(batch_dir):
         cols = st.columns(6)
         for i, (im, cap) in enumerate(zip(grid_imgs, grid_caps)):
             with cols[i % 6]:
-                st.image(img, caption="입력 이미지", use_container_width=True)
+                st.image(im, caption=cap, use_container_width=True)
 
     # 결과 테이블 & 다운로드
     import pandas as pd
@@ -277,6 +281,7 @@ if model and idx_to_class and batch_dir and os.path.isdir(batch_dir):
 # --------------- Test 폴더 리포트 ---------------
 st.header("Test 정확도/리포트")
 if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_dir):
+    # classes는 idx 순서대로 (0..N-1) 정렬
     classes = [idx_to_class[i] for i in sorted(idx_to_class.keys())]
 
     img_paths, y_true = [], []
@@ -300,7 +305,8 @@ if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_d
         y_pred = []
         for p in img_paths:
             im = Image.open(p).convert("RGB")
-            label, conf, top, _ = predict_image(model, preprocess, im, idx_to_class, threshold=0.0, topk=topk)  # 임계치 없이 순수 예측
+            # 리포트 계산에서는 임계치 0.0 (무조건 1등 클래스로 매핑)
+            label, conf, top, _ = predict_image(model, preprocess, im, idx_to_class, threshold=0.0, topk=topk)
             if label == "uncertain":
                 label = top[0][0]
             # 클래스명을 index로 변환
@@ -327,7 +333,7 @@ if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_d
         ticks = np.arange(len(classes))
         plt.xticks(ticks, classes, rotation=45, ha="right")
         plt.yticks(ticks, classes)
-        th = cm.max()/2
+        th = cm.max()/2 if cm.size else 0
         for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
             plt.text(j, i, cm[i, j], ha="center", color="white" if cm[i, j] > th else "black")
         plt.ylabel("True")
