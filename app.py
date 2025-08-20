@@ -192,7 +192,7 @@ if effective_model_path is None:
         effective_model_path = auto_model
 
 if effective_labelmap_path is None and labelmap_file_id:
-    auto_map = ensure_file_via_gdown("./class_to_idx.json", labelmap_file_id)
+    auto_map = ensure_file_via_gdown("./history_eye_new.json", labelmap_file_id)
     if auto_map:
         st.info(f"라벨맵 자동 다운로드 완료: {auto_map}")
         effective_labelmap_path = auto_map
