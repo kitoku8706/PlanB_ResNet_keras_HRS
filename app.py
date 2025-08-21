@@ -338,3 +338,6 @@ if model and class_to_idx and idx_to_class and test_dir and os.path.isdir(test_d
 # --------------- 푸터 ---------------
 st.markdown("---")
 st.caption("✅ 모델은 과적합 시작 직전(Val 최고점) 체크포인트 사용을 권장합니다.")
+
+
+
